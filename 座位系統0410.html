@@ -1,0 +1,1048 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>班級座位視覺化排位系統 (列印優化版)</title>
+  
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
+
+  <style>
+    .select-none { user-select: none; }
+    @keyframes spin-once {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    .animate-spin-once { animation: spin-once 0.5s ease-in-out; }
+    .bg-stripes {
+      background-image: repeating-linear-gradient(
+        45deg,
+        #f8fafc,
+        #f8fafc 10px,
+        #e2e8f0 10px,
+        #e2e8f0 20px
+      );
+    }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+    
+    body { touch-action: manipulation; }
+  </style>
+</head>
+<body class="bg-gray-100 text-gray-800 font-sans">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef, useMemo } = React;
+
+    const Icons = {
+      Lock: ({size=24, ...p}) => <svg width={size} height={size} {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>,
+      Unlock: ({size=24, ...p}) => <svg width={size} height={size} {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 9.9-1"></path></svg>,
+      Shuffle: ({size=24, ...p}) => <svg width={size} height={size} {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="16 3 21 3 21 8"></polyline><line x1="4" y1="20" x2="21" y2="3"></line><polyline points="21 16 21 21 16 21"></polyline><line x1="15" y1="15" x2="21" y2="21"></line><line x1="4" y1="4" x2="9" y2="9"></line></svg>,
+      Settings: ({size=24, ...p}) => <svg width={size} height={size} {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>,
+      Users: ({size=24, ...p}) => <svg width={size} height={size} {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>,
+      X: ({size=24, ...p}) => <svg width={size} height={size} {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>,
+      RefreshCw: ({size=24, ...p}) => <svg width={size} height={size} {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>,
+      Ban: ({size=24, ...p}) => <svg width={size} height={size} {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"></line></svg>,
+      Download: ({size=24, ...p}) => <svg width={size} height={size} {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>,
+      FileText: ({size=24, ...p}) => <svg width={size} height={size} {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>,
+      AlertCircle: ({size=24, ...p}) => <svg width={size} height={size} {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>,
+      Save: ({size=24, ...p}) => <svg width={size} height={size} {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>,
+      FolderOpen: ({size=24, ...p}) => <svg width={size} height={size} {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>,
+      Trash2: ({size=24, ...p}) => <svg width={size} height={size} {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>,
+      ChevronDown: ({size=24, ...p}) => <svg width={size} height={size} {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>,
+      Printer: ({size=24, ...p}) => <svg width={size} height={size} {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>,
+      Upload: ({size=24, ...p}) => <svg width={size} height={size} {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>,
+      Database: ({size=24, ...p}) => <svg width={size} height={size} {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path></svg>
+    };
+
+    function App() {
+      const [dialog, setDialog] = useState({ isOpen: false, text: '', onConfirm: null, isAlert: true });
+      const showAlert = (text) => setDialog({ isOpen: true, text, onConfirm: null, isAlert: true });
+      const showConfirm = (text, onConfirm) => setDialog({ isOpen: true, text, onConfirm, isAlert: false });
+
+      const [cols, setCols] = useState(6); 
+      const [rows, setRows] = useState(5); 
+      const [inputText, setInputText] = useState("1 王小明\n2 陳小華\n3 李小龍\n4 張小美\n5 憂鬱女孩\n6 水系小天使\n7 衝動男孩\n8 乖巧學霸\n9 頑皮猴子\n10 鄰家女孩\n11 酷酷學長\n12 熱心班長");
+      const [manualGenders, setManualGenders] = useState({});
+      const [desks, setDesks] = useState([]);
+      
+      const [draggedIndex, setDraggedIndex] = useState(null);
+      const [selectedIndex, setSelectedIndex] = useState(null);
+      const chartRef = useRef(null);
+      const [isTeacherView, setIsTeacherView] = useState(false);
+      const [isGeneratingImg, setIsGeneratingImg] = useState(false);
+      const [exportMenuOpen, setExportMenuOpen] = useState(false);
+      const exportMenuRef = useRef(null);
+      const jsonFileInputRef = useRef(null);
+
+      const [avoidRules, setAvoidRules] = useState([]);
+      const [togetherRules, setTogetherRules] = useState([]);
+      const [rulePendingStudents, setRulePendingStudents] = useState([]);
+
+      const [draggedMissingStu, setDraggedMissingStu] = useState(null);
+      const [selectedMissingStuIndex, setSelectedMissingStuIndex] = useState(null);
+
+      const [settingsRecords, setSettingsRecords] = useState([]);
+      const [desksRecords, setDesksRecords] = useState([]);
+      const [savePrompt, setSavePrompt] = useState({ isOpen: false, type: '', name: '' });
+      const [manageModal, setManageModal] = useState({ isOpen: false, type: '' });
+
+      const getStuKey = (stu) => {
+          if (!stu) return "";
+          if (stu.key) return stu.key;
+          const cleanName = stu.name.replace(/\(男\)|\(女\)|（男）|（女）|\(M\)|\(F\)|\(B\)|\(G\)/gi, '').trim();
+          return `${stu.no}-${cleanName}`;
+      };
+
+      useEffect(() => {
+        try {
+            const s = JSON.parse(localStorage.getItem('seating_settings_records') || '[]');
+            const d = JSON.parse(localStorage.getItem('seating_desks_records') || '[]');
+            setSettingsRecords(s);
+            setDesksRecords(d);
+        } catch (e) { console.error("讀取存檔紀錄失敗", e); }
+      }, []);
+
+      useEffect(() => {
+        const handleClickOutside = (e) => {
+          if (exportMenuRef.current && !exportMenuRef.current.contains(e.target)) {
+            setExportMenuOpen(false);
+          }
+        };
+        if (exportMenuOpen) document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+      }, [exportMenuOpen]);
+
+      const updateSettingsRecords = (newRecords) => {
+          setSettingsRecords(newRecords);
+          localStorage.setItem('seating_settings_records', JSON.stringify(newRecords));
+      };
+      const updateDesksRecords = (newRecords) => {
+          setDesksRecords(newRecords);
+          localStorage.setItem('seating_desks_records', JSON.stringify(newRecords));
+      };
+
+      const masterStudents = useMemo(() => {
+        const lines = inputText.split('\n').filter(n => n.trim() !== '');
+        return lines.map((line, idx) => {
+          const cleanLine = line.replace(/[\u0000-\u001F\u007F-\u009F\u263A-\u263B]/g, " ").trim();
+          const match = cleanLine.match(/^(\d+)[\s\t,.\-]*\s*(.*)$/);
+          let no = "", rawName = cleanLine;
+          if (match) { no = match[1]; rawName = match[2].trim(); }
+          
+          let parsedGender = 'U';
+          const upperName = rawName.toUpperCase();
+          if (upperName.includes('(男)') || upperName.includes('（男）') || upperName.includes('(M)') || upperName.includes('(B)')) parsedGender = 'M';
+          else if (upperName.includes('(女)') || upperName.includes('（女）') || upperName.includes('(F)') || upperName.includes('(G)')) parsedGender = 'F';
+
+          const cleanName = rawName.replace(/\(男\)|\(女\)|（男）|（女）|\(M\)|\(F\)|\(B\)|\(G\)/gi, '').trim();
+          const key = `${no}-${cleanName}`;
+          const gender = manualGenders[key] || parsedGender;
+
+          return { no, name: cleanName, rawName, gender, key };
+        });
+      }, [inputText, manualGenders]);
+
+      useEffect(() => {
+          setDesks(prevDesks => prevDesks.map(desk => {
+              if (desk.student) {
+                  const updatedStu = masterStudents.find(s => s.key === getStuKey(desk.student));
+                  if (updatedStu && updatedStu.gender !== desk.student.gender) {
+                      return { ...desk, student: updatedStu };
+                  }
+              }
+              return desk;
+          }));
+      }, [masterStudents]);
+
+      const missingStudents = useMemo(() => {
+        const missing = [];
+        const seatedList = desks.map(d => getStuKey(d.student)).filter(k => k !== "");
+        masterStudents.forEach(stu => {
+             const key = getStuKey(stu);
+             const foundIdx = seatedList.indexOf(key);
+             if (foundIdx !== -1) seatedList.splice(foundIdx, 1);
+             else missing.push(stu);
+        });
+        return missing;
+      }, [masterStudents, desks]);
+
+      const availableStudentsForRules = [...masterStudents].sort((a, b) => (parseInt(a.no) || 999) - (parseInt(b.no) || 999));
+      const selectableForRules = availableStudentsForRules.filter(s => !rulePendingStudents.includes(getStuKey(s)));
+
+      useEffect(() => {
+        if (desks.length === 0 || desks.length !== (cols * rows) + 2) {
+            generateEmptyDesksAndLoadStudents(cols, rows, masterStudents);
+        }
+      }, [cols, rows]);
+
+      const generateEmptyDesksAndLoadStudents = (currentCols, currentRows, students) => {
+        const totalGridDesks = currentCols * currentRows;
+        const initialDesks = Array.from({ length: totalGridDesks + 2 }, (_, i) => ({
+          deskId: i < totalGridDesks ? i + 1 : `S${i - totalGridDesks + 1}`, 
+          student: i < totalGridDesks ? (students[i] || null) : null,
+          isLocked: false, 
+          isForcedEmpty: false,
+          isSpecial: i >= totalGridDesks 
+        }));
+        setDesks(initialDesks); setSelectedIndex(null); setSelectedMissingStuIndex(null);
+      };
+
+      const forceReloadStudents = () => { generateEmptyDesksAndLoadStudents(cols, rows, masterStudents); };
+
+      const cycleGender = (key, currentGender) => {
+          const nextGender = currentGender === 'U' ? 'M' : currentGender === 'M' ? 'F' : 'U';
+          setManualGenders(prev => ({ ...prev, [key]: nextGender }));
+      };
+
+      const handleAddAvoidGroup = () => {
+          if (rulePendingStudents.length < 2) { showAlert("互不相鄰群組，請至少選擇 2 位學生！"); return; }
+          setAvoidRules([...avoidRules, { id: Date.now(), students: [...rulePendingStudents] }]);
+          setRulePendingStudents([]);
+      };
+
+      const handleAddTogetherPair = () => {
+          if (rulePendingStudents.length !== 2) { showAlert("必須相鄰的條件，目前僅支援剛好選擇 2 位學生！"); return; }
+          setTogetherRules([...togetherRules, { id: Date.now(), students: [...rulePendingStudents] }]);
+          setRulePendingStudents([]);
+      };
+      
+      const removeRule = (type, id) => {
+        if (type === 'avoid') setAvoidRules(avoidRules.filter(r => r.id !== id));
+        else setTogetherRules(togetherRules.filter(r => r.id !== id));
+      };
+
+      const toggleLock = (index, e) => {
+        e.stopPropagation();
+        const newDesks = [...desks];
+        newDesks[index].isLocked = !newDesks[index].isLocked;
+        setDesks(newDesks);
+      };
+      
+      const toggleForcedEmpty = (index, e) => {
+        e.stopPropagation();
+        const newDesks = [...desks];
+        newDesks[index].isForcedEmpty = !newDesks[index].isForcedEmpty;
+        if (newDesks[index].isForcedEmpty) newDesks[index].student = null;
+        setDesks(newDesks);
+      };
+      
+      const swapStudents = (idx1, idx2) => {
+        const newDesks = [...desks];
+        if (newDesks[idx1].isForcedEmpty || newDesks[idx2].isForcedEmpty) return;
+        const tempStudent = newDesks[idx1].student;
+        newDesks[idx1].student = newDesks[idx2].student;
+        newDesks[idx2].student = tempStudent;
+        setDesks(newDesks);
+      };
+
+      const checkConstraints = (layout) => {
+        const stuPos = {};
+        layout.forEach((d, idx) => { if (d.student) stuPos[getStuKey(d.student)] = idx; });
+        
+        const totalGridDesks = cols * rows;
+        const isAdjacent = (idx1, idx2) => {
+          if (idx1 === undefined || idx2 === undefined) return false;
+          if (idx1 >= totalGridDesks || idx2 >= totalGridDesks) return false; 
+          const x1 = idx1 % cols, y1 = Math.floor(idx1 / cols);
+          const x2 = idx2 % cols, y2 = Math.floor(idx2 / cols);
+          return (Math.abs(x1 - x2) === 1 && y1 === y2) || (Math.abs(y1 - y2) === 1 && x1 === x2);
+        };
+        
+        for (let rule of avoidRules) {
+          const group = rule.students;
+          for(let i=0; i<group.length; i++) {
+              for(let j=i+1; j<group.length; j++) {
+                  if (stuPos[group[i]] !== undefined && stuPos[group[j]] !== undefined) {
+                      if (isAdjacent(stuPos[group[i]], stuPos[group[j]])) return false;
+                  }
+              }
+          }
+        }
+        
+        for (let rule of togetherRules) {
+          const s1 = rule.students[0], s2 = rule.students[1];
+          if (stuPos[s1] !== undefined && stuPos[s2] !== undefined) {
+            if (!isAdjacent(stuPos[s1], stuPos[s2])) return false;
+          }
+        }
+        return true; 
+      };
+
+      const handleShuffle = (isMeihua = false) => {
+        const availableIndices = desks.map((d, i) => (d.isLocked || d.isForcedEmpty || d.isSpecial ? -1 : i)).filter(i => i !== -1);
+        const lockedStudentsKeys = desks.filter(d => (d.isLocked || d.isSpecial) && d.student).map(d => getStuKey(d.student));
+        
+        const studentsToShuffle = [];
+        const lockedListForCheck = [...lockedStudentsKeys];
+        masterStudents.forEach(stu => {
+             const key = getStuKey(stu);
+             const lockedIdx = lockedListForCheck.indexOf(key);
+             if (lockedIdx !== -1) { lockedListForCheck.splice(lockedIdx, 1); } 
+             else { studentsToShuffle.push(stu); }
+        });
+
+        if (studentsToShuffle.length > availableIndices.length) {
+            showAlert(`❌ 空位不足！\n\n需要排入 ${studentsToShuffle.length} 位學生，但一般網格區只有 ${availableIndices.length} 個空位。`);
+            return;
+        }
+
+        let bestLayout = null;
+        let lowestPenalty = Infinity;
+        const maxAttempts = isMeihua ? 1500 : 2000; 
+
+        for (let attempt = 0; attempt < maxAttempts; attempt++) {
+          let currentStudents = [...studentsToShuffle];
+          for (let i = currentStudents.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [currentStudents[i], currentStudents[j]] = [currentStudents[j], currentStudents[i]];
+          }
+          
+          let tempDesks = desks.map(d => ({ ...d }));
+          availableIndices.forEach(idx => { tempDesks[idx].student = null; });
+          availableIndices.forEach((idx, i) => { if (currentStudents[i]) tempDesks[idx].student = currentStudents[i]; });
+          
+          if (checkConstraints(tempDesks)) { 
+             if (!isMeihua) {
+                 bestLayout = tempDesks;
+                 break; 
+             } else {
+                 let penalty = 0;
+                 for(let r=0; r<rows; r++) {
+                     for(let c=0; c<cols; c++) {
+                         const idx = r*cols + c;
+                         const d = tempDesks[idx];
+                         if(!d || !d.student || d.student.gender === 'U') continue;
+                         
+                         if (c < cols - 1) {
+                             const rightD = tempDesks[idx + 1];
+                             if (rightD && rightD.student && rightD.student.gender === d.student.gender) penalty += 1;
+                         }
+                         if (r < rows - 1) {
+                             const bottomD = tempDesks[idx + cols];
+                             if (bottomD && bottomD.student && bottomD.student.gender === d.student.gender) penalty += 1;
+                         }
+                     }
+                 }
+                 if (penalty < lowestPenalty) {
+                     lowestPenalty = penalty;
+                     bestLayout = tempDesks;
+                     if (penalty === 0) break; 
+                 }
+             }
+          }
+        }
+        
+        if (bestLayout) { 
+            setDesks(bestLayout); setSelectedIndex(null); setSelectedMissingStuIndex(null);
+        } else { 
+            showAlert("⚠️ 洗牌失敗！目前的條件過於嚴苛，導致無法排出任何座位。請放寬條件或解鎖座位後重試。"); 
+        }
+      };
+
+      const handleDragStart = (e, index) => {
+        if (desks[index].isLocked || desks[index].isForcedEmpty) { e.preventDefault(); return; }
+        setDraggedIndex(index);
+        setTimeout(() => e.target.classList.add('opacity-40'), 0);
+      };
+      const handleMissingDragStart = (e, stu) => { setDraggedMissingStu(stu); };
+      const handleDragEnd = (e) => { e.target.classList.remove('opacity-40'); setDraggedIndex(null); setDraggedMissingStu(null); };
+      const handleDragOver = (e) => { e.preventDefault(); };
+      const handleDrop = (e, dropIndex) => {
+        e.preventDefault();
+        if (desks[dropIndex].isLocked || desks[dropIndex].isForcedEmpty) return;
+
+        if (draggedMissingStu) {
+           const newDesks = [...desks];
+           newDesks[dropIndex].student = draggedMissingStu;
+           setDesks(newDesks); setDraggedMissingStu(null); return;
+        }
+
+        if (draggedIndex !== null && draggedIndex !== dropIndex) {
+          if (desks[draggedIndex].isLocked || desks[draggedIndex].isForcedEmpty) return;
+          swapStudents(draggedIndex, dropIndex); setDraggedIndex(null);
+        }
+      };
+      
+      const handleDeskClick = (idx) => {
+        if (desks[idx].isForcedEmpty) return;
+        if (selectedMissingStuIndex !== null) {
+            const stuToPlace = missingStudents[selectedMissingStuIndex];
+            const newDesks = [...desks];
+            newDesks[idx].student = stuToPlace;
+            setDesks(newDesks); setSelectedMissingStuIndex(null); return;
+        }
+        if (selectedIndex === null) setSelectedIndex(idx);
+        else if (selectedIndex === idx) setSelectedIndex(null);
+        else { swapStudents(selectedIndex, idx); setSelectedIndex(null); }
+      };
+
+      const downloadCleanImage = () => {
+        const originalScrollX = window.scrollX;
+        const originalScrollY = window.scrollY;
+        setIsGeneratingImg(true); 
+        
+        setTimeout(() => {
+          window.scrollTo(0, 0);
+          if (chartRef.current && window.html2canvas) {
+            window.html2canvas(chartRef.current, { 
+              scale: 2, 
+              backgroundColor: "#ffffff",
+              useCORS: true
+            }).then(canvas => {
+              const link = document.createElement('a');
+              link.download = `黑白座位表_${new Date().getTime()}.png`;
+              link.href = canvas.toDataURL('image/png');
+              link.click(); 
+              setIsGeneratingImg(false); 
+              setTimeout(() => window.scrollTo(originalScrollX, originalScrollY), 50);
+              showAlert("✅ 「黑白列印版」圖檔已成功下載！");
+            }).catch((err) => {
+              console.error(err);
+              setIsGeneratingImg(false); 
+              setTimeout(() => window.scrollTo(originalScrollX, originalScrollY), 50);
+              showAlert("❌ 圖檔下載發生錯誤");
+            });
+          }
+        }, 400); 
+      };
+
+      const copyAsWordTable = () => {
+        let tableHtml = '<table border="1" style="border-collapse: collapse; width: 100%; text-align: center; font-family: \'Microsoft JhengHei\', sans-serif;">';
+        if (!isTeacherView) tableHtml += `<tr><td colspan="${cols}" style="background-color: #f3f4f6; font-weight: bold; font-size: 16px; padding: 10px; letter-spacing: 5px; color: #000;">講台</td></tr>`;
+        for (let r = 0; r < rows; r++) {
+          tableHtml += '<tr>';
+          for (let c = 0; c < cols; c++) {
+            let idx = isTeacherView ? ((rows - 1 - r) * cols + (cols - 1 - c)) : (r * cols + c);
+            let desk = desks[idx];
+            let cellContent = "";
+            let tdStyle = `padding: 15px; width: ${100/cols}%; height: 70px; vertical-align: middle; border: 1px solid #000;`;
+            
+            if (desk.isForcedEmpty) {
+                tdStyle += ' background-color: #f3f4f6;';
+                cellContent = '<span style="color: #9ca3af; font-size: 12px;">禁坐</span>';
+            } else if (desk.student) {
+                const cleanName = desk.student.name.replace(/\(男\)|\(女\)/g,'');
+                cellContent = `<span style="font-size: 12px; color: #555;">${desk.student.no}</span><br/><b style="font-size: 16px; color: #000;">${cleanName}</b>`;
+            }
+            tableHtml += `<td style="${tdStyle}">${cellContent}</td>`;
+          }
+          tableHtml += '</tr>';
+        }
+        if (isTeacherView) tableHtml += `<tr><td colspan="${cols}" style="background-color: #f3f4f6; font-weight: bold; font-size: 16px; padding: 10px; letter-spacing: 5px; color: #000;">講台</td></tr>`;
+        tableHtml += '</table>';
+        const tempDiv = document.createElement("div"); tempDiv.innerHTML = tableHtml; tempDiv.style.position = "absolute"; tempDiv.style.left = "-9999px"; document.body.appendChild(tempDiv);
+        const range = document.createRange(); range.selectNodeContents(tempDiv); const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range);
+        try { document.execCommand('copy'); showAlert("✅ 已經複製為 Word 專用表格格式！\n此版本為純粹的黑白列印格式，請直接在 Word 貼上。"); } 
+        catch (err) { showAlert("複製失敗，您的瀏覽器可能不支援此功能。"); }
+        selection.removeAllRanges(); document.body.removeChild(tempDiv);
+      };
+      
+      const exportAsCSV = () => {
+        const BOM = '\uFEFF';
+        let rows_data = [];
+        rows_data.push(['列/排', ...Array.from({length: cols}, (_, i) => `第${i+1}路`)]);
+        for (let r = 0; r < rows; r++) {
+          const rowArr = [`第${r+1}排`];
+          for (let c = 0; c < cols; c++) {
+            const idx = isTeacherView ? ((rows - 1 - r) * cols + (cols - 1 - c)) : (r * cols + c);
+            const desk = desks[idx];
+            if (!desk) { rowArr.push(''); continue; }
+            if (desk.isForcedEmpty) rowArr.push('[禁坐]');
+            else if (desk.student) rowArr.push(`${desk.student.no} ${desk.student.name}`);
+            else rowArr.push('');
+          }
+          rows_data.push(rowArr);
+        }
+        // 加入講台列與特別座
+        rows_data.push([]);
+        rows_data.push(['講台']);
+        const s1 = desks[cols * rows];
+        const s2 = desks[cols * rows + 1];
+        if (s1 || s2) {
+          rows_data.push(['左特別座', s1 && s1.student ? `${s1.student.no} ${s1.student.name}` : '(空)', '右特別座', s2 && s2.student ? `${s2.student.no} ${s2.student.name}` : '(空)']);
+        }
+        const csvContent = BOM + rows_data.map(row => row.map(cell => `"${String(cell).replace(/"/g,'""')}"`).join(',')).join('\n');
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = `座位表_${new Date().toLocaleDateString('zh-TW').replace(/\//g,'-')}.csv`;
+        link.click();
+        showAlert('✅ CSV 檔案已下載！\n可用 Excel 或 Numbers 開啟。');
+      };
+
+      const printSeating = () => {
+        const originalScrollX = window.scrollX;
+        const originalScrollY = window.scrollY;
+        setIsGeneratingImg(true);
+        setTimeout(() => {
+          window.scrollTo(0, 0);
+          if (chartRef.current && window.html2canvas) {
+            window.html2canvas(chartRef.current, { scale: 2, backgroundColor: '#ffffff', useCORS: true }).then(canvas => {
+              setIsGeneratingImg(false);
+              setTimeout(() => window.scrollTo(originalScrollX, originalScrollY), 50);
+              const dataUrl = canvas.toDataURL('image/png');
+              const printWin = window.open('', '_blank');
+              printWin.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>座位表列印</title>
+                <style>
+                  @page { margin: 10mm; }
+                  body { margin: 0; display: flex; justify-content: center; align-items: flex-start; }
+                  img { max-width: 100%; height: auto; display: block; }
+                </style></head><body>
+                <img src="${dataUrl}" onload="window.print(); window.close();" />
+              </body></html>`);
+              printWin.document.close();
+            }).catch(err => {
+              console.error(err);
+              setIsGeneratingImg(false);
+              setTimeout(() => window.scrollTo(originalScrollX, originalScrollY), 50);
+              showAlert('❌ 列印發生錯誤');
+            });
+          }
+        }, 400);
+      };
+
+      const backupToJSON = () => {
+        const backupData = {
+          version: 1,
+          exportDate: new Date().toISOString(),
+          state: {
+            cols, rows, inputText, manualGenders,
+            avoidRules, togetherRules,
+            desks: JSON.parse(JSON.stringify(desks)),
+            settingsRecords, desksRecords
+          }
+        };
+        const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: 'application/json' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = `座位系統備份_${new Date().toLocaleDateString('zh-TW').replace(/\//g,'-')}.json`;
+        link.click();
+        showAlert('✅ JSON 備份檔案已下載！\n包含所有名單、條件、座位與存檔紀錄。');
+      };
+
+      const restoreFromJSON = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (evt) => {
+          try {
+            const data = JSON.parse(evt.target.result);
+            if (!data.state) { showAlert('❌ 無效的備份檔案格式！'); return; }
+            const s = data.state;
+            showConfirm(`確定要從備份「${file.name}」\n（${new Date(data.exportDate).toLocaleString('zh-TW')}）\n還原所有資料？\n\n⚠️ 目前的資料將被覆蓋！`, () => {
+              if (s.cols) setCols(s.cols);
+              if (s.rows) setRows(s.rows);
+              if (s.inputText !== undefined) setInputText(s.inputText);
+              if (s.manualGenders) setManualGenders(s.manualGenders);
+              if (s.avoidRules) setAvoidRules(s.avoidRules);
+              if (s.togetherRules) setTogetherRules(s.togetherRules);
+              if (s.desks) setDesks(JSON.parse(JSON.stringify(s.desks)));
+              if (s.settingsRecords) updateSettingsRecords(s.settingsRecords);
+              if (s.desksRecords) updateDesksRecords(s.desksRecords);
+              showAlert('✅ 備份資料已成功還原！');
+            });
+          } catch (err) {
+            showAlert('❌ 讀取備份檔案失敗，請確認檔案格式正確。');
+          }
+        };
+        reader.readAsText(file);
+        e.target.value = '';
+      };
+
+      const openSavePrompt = (type) => {
+        const now = new Date();
+        const defaultName = `${now.getMonth()+1}月${now.getDate()}日 ${now.getHours()}:${String(now.getMinutes()).padStart(2, '0')}`;
+        setSavePrompt({ isOpen: true, type, name: defaultName });
+      };
+
+      const handleSaveConfirm = () => {
+        if (!savePrompt.name.trim()) { showAlert("請輸入存檔名稱！"); return; }
+        const targetRecords = savePrompt.type === 'settings' ? [...settingsRecords] : [...desksRecords];
+        const existingIndex = targetRecords.findIndex(r => r.name === savePrompt.name);
+        
+        let newData;
+        if (savePrompt.type === 'settings') {
+            newData = { inputText, avoidRules, togetherRules, cols, rows, manualGenders };
+        } else {
+            newData = { cols, rows, desks: JSON.parse(JSON.stringify(desks)) };
+        }
+
+        if (existingIndex !== -1) {
+            targetRecords[existingIndex].data = newData;
+            targetRecords[existingIndex].date = new Date().toLocaleString();
+            const updatedRecord = targetRecords.splice(existingIndex, 1)[0];
+            targetRecords.unshift(updatedRecord);
+        } else {
+            const newRecord = { id: Date.now().toString(), name: savePrompt.name, date: new Date().toLocaleString(), data: newData };
+            targetRecords.unshift(newRecord);
+        }
+
+        if (savePrompt.type === 'settings') {
+            updateSettingsRecords(targetRecords); showAlert(`✅ 名單、條件與性別設定已成功${existingIndex !== -1 ? '覆蓋' : '儲存'}！`);
+        } else {
+            updateDesksRecords(targetRecords); showAlert(`✅ 座位表已成功${existingIndex !== -1 ? '覆蓋' : '儲存'}！`);
+        }
+        setSavePrompt({ isOpen: false, type: '', name: '' });
+      };
+
+      const loadRecord = (type, record) => {
+          if (type === 'settings') {
+              setInputText(record.data.inputText || "");
+              if (record.data.cols) setCols(record.data.cols);
+              if (record.data.rows) setRows(record.data.rows);
+              
+              if (record.data.manualGenders) setManualGenders(record.data.manualGenders);
+              else setManualGenders({});
+
+              let loadedAvoid = record.data.avoidRules || [];
+              loadedAvoid = loadedAvoid.map(r => r.s1 ? { id: r.id, students: [r.s1, r.s2] } : r);
+              setAvoidRules(loadedAvoid);
+
+              let loadedTogether = record.data.togetherRules || [];
+              loadedTogether = loadedTogether.map(r => r.s1 ? { id: r.id, students: [r.s1, r.s2] } : r);
+              setTogetherRules(loadedTogether);
+
+              showAlert(`✅ 成功讀取名單條件：「${record.name}」`);
+          } else {
+              if (record.data.cols) setCols(record.data.cols);
+              if (record.data.rows) setRows(record.data.rows);
+              if (record.data.desks) {
+                  let loadedDesks = JSON.parse(JSON.stringify(record.data.desks));
+                  const expectedGridDesks = record.data.cols * record.data.rows;
+                  if (loadedDesks.length === expectedGridDesks) {
+                      loadedDesks.push({ deskId: 'S1', student: null, isLocked: false, isForcedEmpty: false, isSpecial: true });
+                      loadedDesks.push({ deskId: 'S2', student: null, isLocked: false, isForcedEmpty: false, isSpecial: true });
+                  }
+                  setDesks(loadedDesks);
+              }
+              showAlert(`✅ 成功讀取座位表：「${record.name}」`);
+          }
+          setManageModal({ isOpen: false, type: '' });
+      };
+
+      const deleteRecord = (type, id) => {
+          if (type === 'settings') updateSettingsRecords(settingsRecords.filter(r => r.id !== id));
+          else updateDesksRecords(desksRecords.filter(r => r.id !== id));
+      };
+
+      const isDuplicateName = useMemo(() => {
+          if (!savePrompt.isOpen) return false;
+          const records = savePrompt.type === 'settings' ? settingsRecords : desksRecords;
+          return records.some(r => r.name === savePrompt.name);
+      }, [savePrompt.name, savePrompt.isOpen, savePrompt.type, settingsRecords, desksRecords]);
+
+      const deskBoxClass = isGeneratingImg ? 'h-[5.5rem] border-2 border-gray-400 px-1' : 'h-[4.5rem] md:h-24 border md:border-2 px-0.5 md:px-1';
+
+      const renderDeskCard = (desk, idx, isSpecial = false, specialLabel = '') => {
+        if (!desk) return null;
+        const stu = desk.student;
+        const isSelected = selectedIndex === idx;
+
+        let styleClass = '';
+        let noTextColor = '';
+        let nameTextColor = '';
+        let lockColor = '';
+
+        if (desk.isForcedEmpty) {
+            styleClass = isGeneratingImg ? 'border-transparent bg-transparent shadow-none' : 'bg-stripes border-gray-300';
+        } else if (!stu) {
+            styleClass = isSelected ? 'bg-indigo-50 border-indigo-500 ring-2 ring-indigo-300 scale-105 z-10' : 'bg-white border-gray-200 hover:border-indigo-300 hover:shadow-sm';
+            if (isGeneratingImg) styleClass = 'bg-white border-gray-400 border shadow-none';
+        } else {
+            if (isGeneratingImg) {
+                styleClass = 'bg-white border-black border-2 shadow-none';
+                noTextColor = 'text-gray-500';
+                nameTextColor = 'text-black';
+            } else {
+                if (stu.gender === 'M') {
+                    styleClass = 'bg-blue-500 border-blue-600 shadow-sm';
+                    noTextColor = 'text-blue-100'; nameTextColor = 'text-white'; lockColor = 'text-amber-300';
+                } else if (stu.gender === 'F') {
+                    styleClass = 'bg-rose-500 border-rose-600 shadow-sm';
+                    noTextColor = 'text-rose-100'; nameTextColor = 'text-white'; lockColor = 'text-amber-300';
+                } else {
+                    styleClass = 'bg-white border-gray-200';
+                    noTextColor = 'text-gray-500'; nameTextColor = 'text-gray-800'; lockColor = 'text-rose-600';
+                }
+
+                if (isSelected) styleClass += ' ring-2 ring-indigo-400 scale-105 z-10';
+                else styleClass += ' hover:brightness-110 hover:shadow-md';
+
+                if (desk.isLocked) {
+                    if (stu.gender === 'M' || stu.gender === 'F') styleClass += ' ring-2 ring-amber-300 ring-inset shadow-md';
+                    else styleClass += ' ring-2 ring-rose-400 ring-inset bg-rose-50';
+                }
+            }
+        }
+
+        if (isSpecial && !stu && !isGeneratingImg && !desk.isForcedEmpty) {
+            styleClass += ' border-dashed border-2 bg-amber-50/50 hover:bg-amber-50';
+        }
+
+        const overflowClass = isGeneratingImg ? 'overflow-visible' : 'overflow-hidden';
+
+        return (
+          <div key={`desk-${idx}`} draggable={!desk.isLocked && !desk.isForcedEmpty && !isGeneratingImg}
+            onDragStart={(e) => handleDragStart(e, idx)} onDragEnd={handleDragEnd} onDragOver={handleDragOver} onDrop={(e) => handleDrop(e, idx)}
+            onClick={() => handleDeskClick(idx)}
+            className={`relative rounded-lg flex flex-col items-center justify-center transition-all ${overflowClass} ${deskBoxClass} ${styleClass} ${isSpecial ? 'w-full h-[4.5rem] md:h-24' : ''}`}
+          >
+            <div className={`w-full h-full flex flex-col items-center justify-center ${isTeacherView ? 'rotate-180' : 'rotate-0'}`}>
+              {!isGeneratingImg && (
+                <div className="absolute top-0.5 right-0.5 md:top-1 md:right-1 flex gap-0.5 md:gap-1 z-20">
+                  <button onClick={(e) => toggleLock(idx, e)}
+                    title={desk.isLocked ? '已鎖定（點擊解鎖）' : '點擊鎖定'}
+                    className={`p-0.5 md:p-1 rounded transition-colors ${desk.isLocked ? 'bg-red-100 text-red-500' : 'bg-black/10 text-white hover:bg-black/20'}`}>
+                    {desk.isLocked
+                      ? <Icons.Lock size={12} className="md:w-3.5 md:h-3.5"/>
+                      : <Icons.Unlock size={12} className="md:w-3.5 md:h-3.5"/>}
+                  </button>
+                  <button onClick={(e) => toggleForcedEmpty(idx, e)}
+                    title={desk.isForcedEmpty ? '已設禁坐（點擊取消）' : '點擊設為禁坐'}
+                    className={`p-0.5 md:p-1 rounded transition-colors ${desk.isForcedEmpty ? 'bg-red-100 text-red-500' : 'bg-black/10 text-white hover:bg-black/20'}`}>
+                    <Icons.Ban size={12} className="md:w-3.5 md:h-3.5"/>
+                  </button>
+                </div>
+              )}
+              {!isGeneratingImg && !desk.isForcedEmpty && (
+                  <span className="absolute top-0.5 left-1 md:top-1 md:left-1.5 text-[8px] md:text-[10px] opacity-30 font-mono text-current">
+                      {isSpecial ? '特' : `#${desk.deskId}`}
+                  </span>
+              )}
+              {desk.isForcedEmpty ? (
+                  <span className="text-gray-400 text-[10px] md:text-sm font-bold tracking-widest">{isGeneratingImg ? '' : '禁坐區'}</span>
+              ) : stu ? (
+                <>
+                  {stu.no && <span className={`text-[9px] md:text-[11px] font-bold ${noTextColor}`}>{stu.no}</span>}
+                  <span className={`text-xs md:text-lg leading-normal text-center px-0.5 md:px-1 w-full font-bold pb-1 ${nameTextColor} ${!isGeneratingImg ? 'truncate' : ''}`}>{stu.name}</span>
+                </>
+              ) : (<span className="text-gray-400 text-[10px] md:text-xs italic">{isSpecial ? specialLabel : '空位'}</span>)}
+            </div>
+          </div>
+        );
+      };
+
+      return (
+        <div className={isGeneratingImg ? "p-8 bg-white w-max min-w-full min-h-max" : "flex flex-col lg:flex-row gap-4 min-h-screen lg:h-screen p-2 md:p-4 bg-gray-100 overflow-x-hidden lg:overflow-hidden"}>
+          
+          {dialog.isOpen && (
+            <div className="fixed inset-0 z-[300] bg-black/50 flex items-center justify-center p-4">
+              <div className="bg-white rounded-xl shadow-xl p-6 max-w-sm w-full text-center whitespace-pre-line border-t-4 border-blue-500">
+                <p className="font-bold text-gray-800 mb-6">{dialog.text}</p>
+                <div className="flex justify-center gap-3">
+                  {!dialog.isAlert && <button onClick={() => setDialog({...dialog, isOpen: false})} className="px-5 py-2 rounded-lg bg-gray-200 text-gray-700 hover:bg-gray-300 w-full">取消</button>}
+                  <button onClick={() => { if(dialog.onConfirm) dialog.onConfirm(); setDialog({...dialog, isOpen: false}); }} className="px-5 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 w-full">確定</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {savePrompt.isOpen && (
+             <div className="fixed inset-0 z-[200] bg-black/50 flex items-center justify-center p-4">
+               <div className="bg-white rounded-xl shadow-xl p-6 max-w-sm w-full border-t-4 border-emerald-500">
+                 <h3 className="font-bold text-lg mb-4 text-gray-800">儲存{savePrompt.type === 'settings' ? '名單與條件' : '座位表'}</h3>
+                 <div className="mb-5">
+                    <label className="block text-sm text-gray-600 mb-2">請為這次存檔命名：</label>
+                    <input type="text" value={savePrompt.name} onChange={e => setSavePrompt({...savePrompt, name: e.target.value})} 
+                           className="w-full border border-gray-300 p-2.5 rounded focus:border-emerald-500 outline-none" autoFocus />
+                 </div>
+                 <div className="flex justify-end gap-3">
+                   <button onClick={() => setSavePrompt({isOpen: false, type: '', name: ''})} className="px-5 py-2 rounded-lg bg-gray-200 text-gray-700 hover:bg-gray-300">取消</button>
+                   <button onClick={handleSaveConfirm} className={`px-5 py-2 rounded-lg text-white ${isDuplicateName ? 'bg-amber-600 hover:bg-amber-700' : 'bg-emerald-600 hover:bg-emerald-700'}`}>
+                       {isDuplicateName ? '覆蓋現有存檔' : '存為新檔'}
+                   </button>
+                 </div>
+               </div>
+             </div>
+          )}
+
+          {manageModal.isOpen && (
+             <div className="fixed inset-0 z-[200] bg-black/50 flex items-center justify-center p-4">
+               <div className="bg-white rounded-xl shadow-xl p-0 max-w-md w-full border-t-4 border-indigo-500 overflow-hidden flex flex-col max-h-[80vh]">
+                 <div className="p-4 border-b flex justify-between items-center bg-gray-50">
+                    <h3 className="font-bold text-lg text-gray-800 flex items-center gap-2">
+                        <Icons.FolderOpen size={20} className="text-indigo-600" />
+                        讀取 / 刪除{manageModal.type === 'settings' ? '名單條件' : '座位表'}
+                    </h3>
+                    <button onClick={() => setManageModal({isOpen: false, type: ''})} className="text-gray-400 hover:text-gray-600"><Icons.X size={24}/></button>
+                 </div>
+                 <div className="p-4 overflow-y-auto flex-1 bg-white">
+                    {(() => {
+                        const records = manageModal.type === 'settings' ? settingsRecords : desksRecords;
+                        if (records.length === 0) return <p className="text-center text-gray-400 py-8">目前沒有任何存檔紀錄</p>;
+                        return records.map(record => (
+                            <div key={record.id} className="flex justify-between items-center p-3 mb-2 bg-gray-50 border border-gray-200 rounded-lg hover:border-indigo-300">
+                                <div><div className="font-bold text-gray-700">{record.name}</div><div className="text-[11px] text-gray-400">{record.date}</div></div>
+                                <div className="flex gap-2">
+                                    <button onClick={() => loadRecord(manageModal.type, record)} className="px-3 py-1.5 bg-indigo-100 text-indigo-700 rounded text-sm font-bold hover:bg-indigo-200">讀取</button>
+                                    <button onClick={() => deleteRecord(manageModal.type, record.id)} className="px-2 py-1.5 bg-rose-50 text-rose-500 rounded hover:bg-rose-100"><Icons.Trash2 size={16}/></button>
+                                </div>
+                            </div>
+                        ));
+                    })()}
+                 </div>
+               </div>
+             </div>
+          )}
+
+          <div className={`w-full lg:w-72 xl:w-80 gap-3 shrink-0 lg:h-full lg:overflow-y-auto ${isGeneratingImg ? 'hidden' : 'flex flex-col'}`}>
+            <div className="bg-white p-3 md:p-4 rounded-xl shadow-sm border border-gray-200 flex flex-col">
+              <h2 className="flex items-center gap-2 font-bold text-gray-700 mb-2"><Icons.Settings size={18}/> 教室與名單</h2>
+              <div className="grid grid-cols-2 gap-3 mb-2">
+                <div><label className="text-xs text-gray-500 mb-1 block">直排 (幾路)</label><input type="number" value={cols} onChange={e => setCols(parseInt(e.target.value)||1)} className="w-full border border-gray-300 p-1.5 rounded focus:border-blue-500 outline-none" /></div>
+                <div><label className="text-xs text-gray-500 mb-1 block">橫列 (幾排)</label><input type="number" value={rows} onChange={e => setRows(parseInt(e.target.value)||1)} className="w-full border border-gray-300 p-1.5 rounded focus:border-blue-500 outline-none" /></div>
+              </div>
+              
+              <textarea className="w-full h-20 md:h-24 border border-gray-300 p-2 rounded text-sm focus:border-blue-500 outline-none resize-none leading-relaxed" value={inputText} onChange={e => setInputText(e.target.value)} placeholder="貼上學生名單..."/>
+              
+              <div className="mt-2 bg-gray-50 border border-gray-200 p-2 rounded-lg">
+                 <div className="flex justify-between items-center mb-1.5">
+                    <span className="text-xs font-bold text-gray-600">🧑‍🤝‍🧑 點擊切換名單性別</span>
+                    {Object.keys(manualGenders).length > 0 && <button onClick={() => setManualGenders({})} className="text-[10px] text-gray-400 hover:text-blue-500">重設全部</button>}
+                 </div>
+                 <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto" style={{scrollbarWidth:'thin', scrollbarColor:'#cbd5e1 #f8fafc'}}>
+                    {masterStudents.map(stu => {
+                        let btnClass = 'bg-white text-gray-600 border border-gray-300 hover:bg-gray-100';
+                        if (stu.gender === 'M') btnClass = 'bg-blue-500 text-white border-blue-600 hover:bg-blue-600 shadow-sm';
+                        else if (stu.gender === 'F') btnClass = 'bg-rose-500 text-white border-rose-600 hover:bg-rose-600 shadow-sm';
+                        
+                        return (
+                           <button key={stu.key} onClick={() => cycleGender(stu.key, stu.gender)} className={`px-1.5 py-0.5 rounded text-[11px] font-bold transition-colors ${btnClass}`}>
+                              {stu.name}
+                           </button>
+                        );
+                    })}
+                 </div>
+              </div>
+
+              <button onClick={forceReloadStudents} className="w-full mt-2 bg-gray-700 text-white py-2 rounded font-bold hover:bg-gray-800 transition-colors text-sm">確認變更 / 重設空位</button>
+
+              {/* 名單存檔列：緊接在確認變更下方 */}
+              <div className="mt-2 flex items-center gap-1.5">
+                <span className="text-[10px] font-bold text-cyan-700 whitespace-nowrap">名單存檔</span>
+                <button onClick={() => openSavePrompt('settings')} title="儲存名單與條件"
+                  className="flex-1 bg-cyan-600 text-white py-1.5 rounded-lg font-bold text-[11px] hover:bg-cyan-700 shadow-sm transition-colors flex items-center justify-center gap-1">
+                  <Icons.Save size={12}/> 儲存設定
+                </button>
+                <button onClick={() => setManageModal({isOpen: true, type: 'settings'})} title="讀取/管理名單條件存檔"
+                  className="flex-1 relative bg-cyan-100 text-cyan-800 border border-cyan-300 py-1.5 rounded-lg font-bold text-[11px] hover:bg-cyan-200 shadow-sm transition-colors flex items-center justify-center gap-1">
+                  <Icons.FolderOpen size={12}/>
+                  {settingsRecords.length > 0 && <span className="absolute -top-1 -right-1 bg-rose-500 text-white text-[8px] rounded-full w-3 h-3 flex items-center justify-center leading-none">{settingsRecords.length}</span>}
+                  讀取/管理
+                </button>
+              </div>
+            </div>
+
+            <div className="bg-white p-3 md:p-4 rounded-xl shadow-sm border border-gray-200 flex-1 flex flex-col min-h-0">
+              <h2 className="flex items-center justify-between font-bold text-indigo-700 mb-2 shrink-0">
+                <span className="flex items-center gap-2"><Icons.Users size={18}/> 排位條件產生器</span>
+                <span className="text-[10px] bg-indigo-100 px-2 py-0.5 rounded-full">{avoidRules.length + togetherRules.length} 條</span>
+              </h2>
+              
+              <div className="bg-indigo-50/50 p-2 rounded-lg border border-indigo-100 mb-2 shrink-0">
+                <div className="text-xs text-indigo-800 font-bold mb-1.5">1. 選取多位學生加入群組：</div>
+                
+                <div className="flex flex-wrap gap-1.5 mb-2 min-h-[28px]">
+                   {rulePendingStudents.length === 0 && <span className="text-xs text-gray-400 py-1 italic">尚未選取任何學生...</span>}
+                   {rulePendingStudents.map(key => (
+                       <span key={key} className="bg-indigo-600 text-white text-xs px-2 py-1 rounded-md flex items-center gap-1 shadow-sm">
+                          {key.split('-')[1].replace(/\(男\)|\(女\)/g,'')} 
+                          <button onClick={() => setRulePendingStudents(rulePendingStudents.filter(k => k !== key))} className="hover:text-indigo-200"><Icons.X size={12}/></button>
+                       </span>
+                   ))}
+                </div>
+
+                <select value="" onChange={(e) => { if(e.target.value) setRulePendingStudents([...rulePendingStudents, e.target.value]); }} 
+                   className="w-full border border-indigo-200 p-1.5 rounded text-sm outline-none bg-white text-indigo-700 font-bold mb-2 cursor-pointer shadow-sm">
+                    <option value="">+ 點擊這裡選擇學生...</option>
+                    {selectableForRules.map(s => <option key={getStuKey(s)} value={getStuKey(s)}>{s.no} {s.name}</option>)}
+                </select>
+
+                <div className="text-xs text-indigo-800 font-bold mb-1.5 mt-2">2. 為群組套用條件：</div>
+                <div className="flex gap-2">
+                  <button onClick={handleAddAvoidGroup} className="flex-1 bg-rose-50 text-rose-600 border border-rose-200 py-1.5 rounded text-xs font-bold hover:bg-rose-100 shadow-sm transition-transform active:scale-95">🚫 群組不相鄰</button>
+                  <button onClick={handleAddTogetherPair} className="flex-1 bg-emerald-50 text-emerald-600 border border-emerald-200 py-1.5 rounded text-xs font-bold hover:bg-emerald-100 shadow-sm transition-transform active:scale-95">🤝 雙人必相鄰</button>
+                </div>
+              </div>
+
+              <div className="flex-1 overflow-y-auto border-t border-gray-100 pt-2 flex flex-col gap-1.5" style={{minHeight:'80px', scrollbarWidth:'thin', scrollbarColor:'#a5b4fc #f0f0ff'}}>
+                {avoidRules.length === 0 && togetherRules.length === 0 && (
+                  <p className="text-center text-gray-300 text-xs py-3 italic">尚無條件規則</p>
+                )}
+                {avoidRules.map(r => (
+                  <div key={r.id} className="flex justify-between items-center bg-rose-50 border border-rose-100 text-rose-700 text-xs px-2 py-1.5 rounded shadow-sm">
+                    <span className="break-words mr-2 leading-relaxed">🚫 <b>{r.students.map(s => s.split('-')[1].replace(/\(男\)|\(女\)/g,'')).join(', ')}</b> (不相鄰)</span>
+                    <button onClick={() => removeRule('avoid', r.id)} className="text-gray-400 hover:text-rose-500 shrink-0"><Icons.X size={14}/></button>
+                  </div>
+                ))}
+                {togetherRules.map(r => (
+                  <div key={r.id} className="flex justify-between items-center bg-emerald-50 border border-emerald-100 text-emerald-700 text-xs px-2 py-1.5 rounded shadow-sm">
+                    <span className="break-words mr-2 leading-relaxed">🤝 <b>{r.students.map(s => s.split('-')[1].replace(/\(男\)|\(女\)/g,'')).join(', ')}</b> (必相鄰)</span>
+                    <button onClick={() => removeRule('together', r.id)} className="text-gray-400 hover:text-emerald-500 shrink-0"><Icons.X size={14}/></button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className={`flex-col min-w-0 ${isGeneratingImg ? 'flex w-max min-w-full min-h-max' : 'flex-1 flex min-h-[500px] lg:min-h-0 lg:h-full relative lg:overflow-hidden'}`}>
+            {!isGeneratingImg && (
+                <div className="text-center text-xs text-gray-500 mb-1 lg:hidden">
+                    💡 手機用戶可直接<strong className="text-blue-500">「點擊兩個座位」</strong>來交換學生
+                </div>
+            )}
+
+            {missingStudents.length > 0 && !isGeneratingImg && (
+              <div className="mb-2 p-2.5 bg-orange-50 border border-orange-300 rounded-xl shadow-sm shrink-0">
+                 <h3 className="font-bold text-orange-800 flex items-center gap-1.5 mb-1.5 text-[13px]">
+                    <Icons.AlertCircle size={14} /> ⚠️ 尚未入座學生 (點擊選取後，再點空位放入)
+                 </h3>
+                 <div className="flex flex-wrap gap-1.5">
+                    {missingStudents.map((stu, i) => {
+                        let btnStyle = 'bg-white border-orange-200 text-gray-800 hover:bg-orange-100';
+                        let noColor = 'text-gray-500';
+                        if (stu.gender === 'M') { btnStyle = 'bg-blue-500 text-white border-blue-600 hover:bg-blue-600'; noColor = 'text-blue-200'; }
+                        else if (stu.gender === 'F') { btnStyle = 'bg-rose-500 text-white border-rose-600 hover:bg-rose-600'; noColor = 'text-rose-200'; }
+                        if (selectedMissingStuIndex === i) { btnStyle += ' ring-2 ring-orange-500 scale-105'; }
+
+                        return (
+                          <div key={`missing-${i}`} draggable onDragStart={(e) => handleMissingDragStart(e, stu)} onDragEnd={handleDragEnd} onClick={() => setSelectedMissingStuIndex(selectedMissingStuIndex === i ? null : i)}
+                             className={`px-2.5 py-1 rounded shadow-sm cursor-pointer transition-all flex items-center gap-1.5 select-none text-xs md:text-sm border ${btnStyle}`}
+                          >
+                             <span className={`text-[10px] font-bold ${noColor}`}>{stu.no}</span>
+                             <span className="font-bold">{stu.name}</span>
+                          </div>
+                        )
+                    })}
+                 </div>
+              </div>
+            )}
+
+            <div className={`bg-white rounded-xl shadow-sm border border-gray-200 flex justify-center ${isGeneratingImg ? 'p-8 overflow-visible w-max min-w-full h-max' : 'flex-1 overflow-x-auto overflow-y-auto p-2 md:p-6 lg:p-8'}`}>
+              <div ref={chartRef} className={`inline-block min-w-fit md:min-w-fit w-full ${isGeneratingImg ? 'bg-white p-8 rounded-xl' : 'transition-all duration-500'}`}>
+                <div className={`transition-transform duration-700 ease-in-out flex flex-col ${isTeacherView ? 'rotate-180' : 'rotate-0'}`}>
+                  
+                  {/* 新增：緊貼講台的左右特別座 */}
+                  <div className="relative w-full flex justify-center items-start mb-6 md:mb-10 gap-1 md:gap-2 lg:gap-3 select-none">
+                     <div className={`w-[55px] md:w-[90px] shrink-0 ${isGeneratingImg ? 'w-[110px]' : ''}`}>
+                        {desks.length > cols * rows && renderDeskCard(desks[cols * rows], cols * rows, true, "左特")}
+                     </div>
+                     <div className={`w-[120px] md:w-[220px] shrink-0 bg-gray-800 text-white flex justify-center items-center py-2 md:py-3 rounded-b-2xl font-bold tracking-[0.5em] shadow-md text-sm md:text-base ${isGeneratingImg ? 'w-[280px] bg-gray-200 text-black border-2 border-black shadow-none' : ''} ${isTeacherView ? 'rotate-180 rounded-t-2xl rounded-b-none' : ''}`}>
+                        講台
+                     </div>
+                     <div className={`w-[55px] md:w-[90px] shrink-0 ${isGeneratingImg ? 'w-[110px]' : ''}`}>
+                        {desks.length > cols * rows + 1 && renderDeskCard(desks[cols * rows + 1], cols * rows + 1, true, "右特")}
+                     </div>
+                  </div>
+
+                  {/* 教室座位網格區 */}
+                  <div className="grid gap-1.5 md:gap-3 select-none" style={{ gridTemplateColumns: `repeat(${cols}, minmax(${isGeneratingImg ? '110px' : '45px'}, 1fr))` }}>
+                    {desks.slice(0, cols * rows).map((desk, idx) => renderDeskCard(desk, idx))}
+                  </div>
+
+                  <div className="mt-6 md:mt-8 flex justify-center items-end px-2">
+                    <div className={`text-gray-400 font-bold tracking-widest text-xs md:text-sm px-6 md:px-8 py-1.5 rounded-t-xl border border-b-0 border-gray-200 ${isGeneratingImg ? 'bg-transparent text-gray-800 border-none' : 'bg-gray-50'} ${isTeacherView ? 'rotate-180 rounded-b-xl rounded-t-none border-b border-t-0' : ''}`}>教室後方</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className={`w-full lg:w-40 xl:w-48 grid grid-cols-2 lg:flex lg:flex-col gap-2 md:gap-3 shrink-0 lg:h-full lg:overflow-y-auto ${isGeneratingImg ? 'hidden' : ''}`}>
+             <button onClick={() => handleShuffle(false)} className="w-full bg-amber-500 text-white py-2.5 md:py-3 lg:py-4 rounded-xl font-black text-sm md:text-base flex flex-col items-center justify-center gap-1 hover:bg-amber-600 shadow-sm transition-transform active:scale-95">
+                <Icons.Shuffle size={18} className="md:w-5 md:h-5"/> 一般洗牌
+             </button>
+             
+             <button onClick={() => handleShuffle(true)} className="w-full bg-pink-500 text-white py-2.5 md:py-3 lg:py-4 rounded-xl font-black text-sm md:text-base flex flex-col items-center justify-center gap-1 hover:bg-pink-600 shadow-sm transition-transform active:scale-95" title="盡量讓相鄰座位的性別不同">
+                <span className="text-lg leading-none">🌸</span> 梅花座洗牌
+             </button>
+
+             <button onClick={() => setIsTeacherView(!isTeacherView)} className={`w-full py-2.5 md:py-3 rounded-xl font-bold text-xs md:text-sm flex flex-col lg:flex-row items-center justify-center gap-1 border-2 transition-colors col-span-2 lg:col-span-1 ${isTeacherView ? 'bg-indigo-50 border-indigo-400 text-indigo-700' : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'}`}>
+                <Icons.RefreshCw size={14} className={`md:w-4 md:h-4 ${isTeacherView ? 'animate-spin-once' : ''}`}/> {isTeacherView ? '老師視角' : '學生視角'}
+             </button>
+
+             <hr className="hidden lg:block my-0.5 border-gray-300 col-span-2" />
+
+             <button onClick={() => openSavePrompt('desks')} className="w-full bg-indigo-600 text-white py-2.5 md:py-3 rounded-xl font-bold text-xs md:text-[13px] flex flex-col items-center justify-center gap-1 hover:bg-indigo-700 shadow-sm transition-transform active:scale-95">
+                <Icons.Save size={16} className="md:w-[18px] md:h-[18px]"/> 儲存座位表
+             </button>
+
+             <button onClick={() => setManageModal({isOpen: true, type: 'desks'})} className="w-full bg-white text-indigo-700 border-2 border-indigo-200 py-2.5 md:py-3 rounded-xl font-bold text-xs md:text-[13px] flex flex-col items-center justify-center gap-1 hover:bg-indigo-50 shadow-sm transition-transform active:scale-95">
+                <div className="relative">
+                  <Icons.FolderOpen size={16} className="md:w-[18px] md:h-[18px]"/>
+                  {desksRecords.length > 0 && <span className="absolute -top-1.5 -right-2 bg-rose-500 text-white text-[9px] rounded-full w-3.5 h-3.5 flex items-center justify-center">{desksRecords.length}</span>}
+                </div>
+                讀取/管理
+             </button>
+
+             <hr className="hidden lg:block my-0.5 border-gray-300 col-span-2" />
+
+             {/* 匯出座位 雙層選單 */}
+             <div ref={exportMenuRef} className="relative col-span-2 lg:col-span-1 w-full">
+               <button
+                 onClick={() => setExportMenuOpen(v => !v)}
+                 className="w-full bg-emerald-600 text-white py-2.5 md:py-3 rounded-xl font-bold text-xs md:text-[13px] flex items-center justify-center gap-1.5 hover:bg-emerald-700 shadow-sm transition-transform active:scale-95"
+               >
+                 <Icons.Download size={16} className="md:w-[18px] md:h-[18px]"/>
+                 <span>匯出座位</span>
+                 <Icons.ChevronDown size={14} className={`transition-transform duration-200 ${exportMenuOpen ? 'rotate-180' : ''}`}/>
+               </button>
+               {exportMenuOpen && (
+                 <div className="absolute bottom-full mb-1.5 left-0 right-0 z-50 bg-white border border-gray-200 rounded-xl shadow-xl overflow-hidden">
+                   <div className="px-3 py-1.5 bg-gray-50 border-b border-gray-100 text-[10px] font-bold text-gray-400 tracking-wider">選擇匯出格式</div>
+                   <button onClick={() => { setExportMenuOpen(false); exportAsCSV(); }}
+                     className="w-full flex items-center gap-2.5 px-3 py-2.5 text-left text-sm font-bold text-emerald-700 hover:bg-emerald-50 transition-colors border-b border-gray-100">
+                     <span className="text-base">📊</span>
+                     <div><div className="text-xs font-bold">CSV 試算表</div><div className="text-[10px] text-gray-400 font-normal">Excel / Numbers 可開啟</div></div>
+                   </button>
+                   <button onClick={() => { setExportMenuOpen(false); copyAsWordTable(); }}
+                     className="w-full flex items-center gap-2.5 px-3 py-2.5 text-left text-sm font-bold text-blue-700 hover:bg-blue-50 transition-colors border-b border-gray-100">
+                     <span className="text-base">📝</span>
+                     <div><div className="text-xs font-bold">Word 表格</div><div className="text-[10px] text-gray-400 font-normal">複製後貼到 Word</div></div>
+                   </button>
+                   <button onClick={() => { setExportMenuOpen(false); downloadCleanImage(); }}
+                     className="w-full flex items-center gap-2.5 px-3 py-2.5 text-left text-sm font-bold text-violet-700 hover:bg-violet-50 transition-colors border-b border-gray-100">
+                     <span className="text-base">🖼️</span>
+                     <div><div className="text-xs font-bold">圖檔 (PNG)</div><div className="text-[10px] text-gray-400 font-normal">黑白列印版圖片</div></div>
+                   </button>
+                   <button onClick={() => { setExportMenuOpen(false); printSeating(); }}
+                     className="w-full flex items-center gap-2.5 px-3 py-2.5 text-left text-sm font-bold text-gray-700 hover:bg-gray-50 transition-colors">
+                     <span className="text-base">🖨️</span>
+                     <div><div className="text-xs font-bold">直接列印</div><div className="text-[10px] text-gray-400 font-normal">開啟系統列印對話框</div></div>
+                   </button>
+                 </div>
+               )}
+             </div>
+
+             <hr className="hidden lg:block my-0.5 border-gray-300 col-span-2" />
+
+             {/* JSON 備份 / 讀取 */}
+             <input ref={jsonFileInputRef} type="file" accept=".json" onChange={restoreFromJSON} className="hidden" />
+             <button onClick={backupToJSON}
+               className="w-full bg-slate-600 text-white py-2.5 md:py-3 rounded-xl font-bold text-xs md:text-[13px] flex flex-col items-center justify-center gap-1 hover:bg-slate-700 shadow-sm transition-transform active:scale-95"
+               title="將所有名單、條件、座位與存檔紀錄備份為 JSON 檔案">
+               <Icons.Database size={16} className="md:w-[18px] md:h-[18px]"/> 備份 JSON
+             </button>
+             <button onClick={() => jsonFileInputRef.current && jsonFileInputRef.current.click()}
+               className="w-full bg-white text-slate-700 border-2 border-slate-300 py-2.5 md:py-3 rounded-xl font-bold text-xs md:text-[13px] flex flex-col items-center justify-center gap-1 hover:bg-slate-50 shadow-sm transition-transform active:scale-95"
+               title="從 JSON 備份檔案還原所有資料">
+               <Icons.Upload size={16} className="md:w-[18px] md:h-[18px]"/> 讀取備份
+             </button>
+          </div>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
